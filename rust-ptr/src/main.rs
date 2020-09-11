@@ -61,7 +61,8 @@ impl ToForeign<c_char> for String {
 // }
 
 impl IntoForeign<c_char> for String {
-    fn into_foreign(self) -> *mut c_char {
+    fn into_foreign(mut self) -> *mut c_char {
+        self.push('\0');
         let ptr = self.as_ptr();
         forget(self);
         ptr as *mut _
