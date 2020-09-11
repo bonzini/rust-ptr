@@ -95,7 +95,7 @@ impl<'a, P: Copy, T: 'a> BorrowedMutPointer<'a, P, T> {
     }
 }
 
-trait ForeignConvertible<'a> {
+trait ForeignConvert<'a> {
     type Native: Copy;
     type Storage: 'a;
 
@@ -103,13 +103,13 @@ trait ForeignConvertible<'a> {
     fn as_foreign(&'a self) -> BorrowedPointer<'a, Self::Native, Self::Storage>;
 }
 
-trait ForeignMutConvertible<'a>: ForeignConvertible<'a> {
+trait ForeignMutConvert<'a>: ForeignConvert<'a> {
     fn as_foreign_mut(&'a self) -> BorrowedMutPointer<'a, Self::Native, Self::Storage>;
 }
 
 // Example:
 
-impl ForeignConvertible<'_> for String {
+impl ForeignConvert<'_> for String {
     type Native = c_char;
     type Storage = CString;
 
