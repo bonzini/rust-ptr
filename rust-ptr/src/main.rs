@@ -176,10 +176,10 @@ fn main() {
     let s = "Hello, world!".to_string();
 
     {
-        let foreign = s.as_foreign();
+        let borrowed = s.as_foreign();
         println!("A Rust String: {}", s);
         println!("Ownership not transferred: {}", unsafe {
-            String::with_foreign(foreign.as_ptr())
+            String::with_foreign(borrowed.as_ptr())
         });
         println!("Still a Rust String: {}", s);
     }
