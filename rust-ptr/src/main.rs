@@ -53,7 +53,7 @@ impl IntoRaw<c_char> for String {
 pub struct BorrowedPointer<'a, P, T: 'a> {
     pub native: *const P,
     pub storage: T,
-    _marker: PhantomData<&'a T>,
+    _marker: PhantomData<&'a P>,
 }
 
 impl<'a, P: Copy, T: 'a> BorrowedPointer<'a, P, T> {
@@ -73,7 +73,7 @@ impl<'a, P: Copy, T: 'a> BorrowedPointer<'a, P, T> {
 pub struct BorrowedMutPointer<'a, P, T: 'a> {
     pub native: *mut P,
     pub storage: T,
-    _marker: PhantomData<&'a T>,
+    _marker: PhantomData<&'a P>,
 }
 
 #[allow(dead_code)]
