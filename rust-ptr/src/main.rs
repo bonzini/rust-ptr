@@ -166,6 +166,12 @@ impl ForeignConvert<'_> for String {
     }
 }
 
+impl<'a, P, T> Drop for BorrowedPointer<'a, P, T> {
+    fn drop(&mut self) {
+        println!("\tDropping a borrowed pointer");
+    }
+}
+
 fn main() {
     let s = "Hello, world!".to_string();
 
@@ -176,6 +182,13 @@ fn main() {
             String::new_from_foreign(foreign.as_ptr())
         });
         println!("Still a Rust String: {}", s);
+    }
+
+    unsafe {
+        println!("Starting printf test");
+        libc::printf("printf says %s\n\0".as_ptr() as *const c_char,
+                     s.as_foreign().as_ptr());
+        println!("Ending printf test");
     }
 
     println!("Created a copy: {}", unsafe {
