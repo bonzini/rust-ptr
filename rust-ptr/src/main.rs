@@ -6,7 +6,6 @@ use libc::size_t;
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomData;
-use std::mem::forget;
 use std::os::raw::c_char;
 
 // Map between C structs and native Rust types, taking ownership of
@@ -53,18 +52,15 @@ impl ToForeign<c_char> for String {
     }
 }
 
-// Could also consider a blanket implementation:
-// impl<T, U> ToForeign<U> for T where T: Clone + IntoForeign<U> {
-//     fn to_foreign(&self) -> *mut U {
-//         return self.clone().into_foreign();
-//     }
-// }
-
+// Not a good idea, because into_foreign() should return
+// a malloc-ed pointer instead.  from_foreign(s.into_foreign())
+// would crash
+#[cfg(broken)]
 impl IntoForeign<c_char> for String {
     fn into_foreign(mut self) -> *mut c_char {
         self.push('\0');
         let ptr = self.as_ptr();
-        forget(self);
+        std::mem::forget(self);
         ptr as *mut _
     }
 }
@@ -198,7 +194,7 @@ fn main() {
     });
 
     {
-        let foreign: *mut c_char = s.into_foreign();
+        let foreign: *mut c_char = s.to_foreign();
         println!("Ownership transferred to C: {}", unsafe {
             String::with_foreign(foreign)
         });
