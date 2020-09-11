@@ -12,18 +12,18 @@ use std::os::raw::c_char;
 // Map between C structs and native Rust types, taking ownership of
 // the pointer or Rust object
 
-trait UnsafeFrom<T> {
-    unsafe fn unsafe_from(_: T) -> Self;
+trait FromForeign<T> {
+    unsafe fn from_foreign(_: T) -> Self;
 }
-trait UnsafeInto<T> {
-    unsafe fn unsafe_into(self) -> T;
+trait IntoNative<T> {
+    unsafe fn into_native(self) -> T;
 }
-impl<T, U> UnsafeInto<U> for T
+impl<T, U> IntoNative<U> for T
 where
-    U: UnsafeFrom<T>,
+    U: FromForeign<T>,
 {
-    unsafe fn unsafe_into(self) -> U {
-        U::unsafe_from(self)
+    unsafe fn into_native(self) -> U {
+        U::from_foreign(self)
     }
 }
 
@@ -37,9 +37,9 @@ trait IntoForeign<T> {
 
 // Example:
 
-impl UnsafeFrom<*mut c_char> for String {
+impl FromForeign<*mut c_char> for String {
     // from_glib_full
-    unsafe fn unsafe_from(ptr: *mut c_char) -> Self {
+    unsafe fn from_foreign(ptr: *mut c_char) -> Self {
         let res = Self::with_foreign(ptr);
         libc::free(ptr as *mut c_void);
         res
@@ -194,7 +194,7 @@ fn main() {
     }
 
     println!("Created a copy: {}", unsafe {
-        String::unsafe_from(s.to_foreign())
+        String::from_foreign(s.to_foreign())
     });
 
     {
@@ -203,11 +203,11 @@ fn main() {
             String::with_foreign(foreign)
         });
         println!("Ownership transferred back: {}", unsafe {
-            String::unsafe_from(foreign)
+            String::from_foreign(foreign)
         });
         println!("Trying to transfer again, will now crash with a double free!");
         println!("Huh, it worked? {}", unsafe {
-            String::unsafe_from(foreign)
+            String::from_foreign(foreign)
         });
     }
 }
