@@ -104,7 +104,7 @@ trait ForeignConvert<'a> {
 }
 
 trait ForeignMutConvert<'a>: ForeignConvert<'a> {
-    fn as_foreign_mut(&'a self) -> BorrowedMutPointer<'a, Self::Native, Self::Storage>;
+    fn as_foreign_mut(&'a mut self) -> BorrowedMutPointer<'a, Self::Native, Self::Storage>;
 }
 
 // Example:
