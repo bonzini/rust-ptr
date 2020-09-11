@@ -188,6 +188,8 @@ fn main() {
         println!("Starting printf test");
         libc::printf("printf says %s\n\0".as_ptr() as *const c_char,
                      s.as_foreign().as_ptr());
+        libc::printf("printf says %s\n\0".as_ptr() as *const c_char,
+                     s.as_foreign().as_ptr());
         println!("Ending printf test");
     }
 
