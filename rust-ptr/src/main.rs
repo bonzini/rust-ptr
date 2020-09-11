@@ -131,20 +131,22 @@ fn main() {
 
     {
         let foreign = s.as_foreign();
+        println!("A Rust String: {}", s);
         println!("Ownership not transferred: {}", unsafe {
             String::new_from_foreign(foreign.as_ptr())
         });
-        println!("Ownership not transferred: {}", unsafe {
-            String::new_from_foreign(foreign.as_ptr())
-        });
+        println!("Still a Rust String: {}", s);
     }
 
     {
         let foreign: *mut c_char = s.into_raw();
-        println!("Ownership transferred and back: {}", unsafe {
+        println!("Ownership transferred to C: {}", unsafe {
+            String::new_from_foreign(foreign)
+        });
+        println!("Ownership transferred back: {}", unsafe {
             String::unsafe_from(foreign)
         });
-        println!("Trying to copy again, will now crash with a double free!");
+        println!("Trying to transfer again, will now crash with a double free!");
         println!("Huh, it worked? {}", unsafe {
             String::unsafe_from(foreign)
         });
