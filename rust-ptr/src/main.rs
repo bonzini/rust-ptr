@@ -73,8 +73,8 @@ impl IntoForeign<c_char> for String {
 // the pointer or Rust object
 
 pub struct BorrowedPointer<'a, P, T: 'a> {
-    pub native: *const P,
-    pub storage: T,
+    native: *const P,
+    storage: T,
     _marker: PhantomData<&'a P>,
 }
 
@@ -99,8 +99,8 @@ impl<'a, P, T> Borrow<T> for BorrowedPointer<'a, P, T> {
 }
 
 pub struct BorrowedMutPointer<'a, P, T: 'a> {
-    pub native: *mut P,
-    pub storage: T,
+    native: *mut P,
+    storage: T,
     _marker: PhantomData<&'a P>,
 }
 
