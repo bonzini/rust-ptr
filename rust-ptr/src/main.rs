@@ -5,6 +5,7 @@
 use libc::size_t;
 use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomData;
+use std::mem::forget;
 use std::os::raw::c_char;
 
 // Map between C structs and native Rust types, taking ownership of
@@ -25,8 +26,12 @@ where
     }
 }
 
-trait IntoRaw<T> {
-    fn into_raw(self) -> *mut T;
+trait ToForeign<T> {
+    fn to_foreign(&self) -> *mut T;
+}
+
+trait IntoForeign<T> {
+    fn into_foreign(self) -> *mut T;
 }
 
 // Example:
@@ -40,10 +45,25 @@ impl UnsafeFrom<*mut c_char> for String {
     }
 }
 
-impl IntoRaw<c_char> for String {
+impl ToForeign<c_char> for String {
     // to_glib_full
-    fn into_raw(self) -> *mut c_char {
+    fn to_foreign(&self) -> *mut c_char {
         unsafe { libc::strndup(self.as_ptr() as *const c_char, self.len() as size_t) }
+    }
+}
+
+// Could also consider a blanket implementation:
+// impl<T, U> ToForeign<U> for T where T: Clone + IntoForeign<U> {
+//     fn to_foreign(&self) -> *mut U {
+//         return self.clone().into_foreign();
+//     }
+// }
+
+impl IntoForeign<c_char> for String {
+    fn into_foreign(self) -> *mut c_char {
+        let ptr = self.as_ptr();
+        forget(self);
+        ptr as *mut _
     }
 }
 
@@ -138,8 +158,12 @@ fn main() {
         println!("Still a Rust String: {}", s);
     }
 
+    println!("Created a copy: {}", unsafe {
+        String::unsafe_from(s.to_foreign())
+    });
+
     {
-        let foreign: *mut c_char = s.into_raw();
+        let foreign: *mut c_char = s.into_foreign();
         println!("Ownership transferred to C: {}", unsafe {
             String::new_from_foreign(foreign)
         });
