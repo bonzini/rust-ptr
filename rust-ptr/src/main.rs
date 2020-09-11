@@ -3,6 +3,7 @@
 // idiomatic.
 
 use libc::size_t;
+use std::borrow::{Borrow, BorrowMut};
 use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomData;
 use std::mem::forget;
@@ -90,6 +91,12 @@ impl<'a, P: Copy, T: 'a> BorrowedPointer<'a, P, T> {
     }
 }
 
+impl<'a, P, T> Borrow<T> for BorrowedPointer<'a, P, T> {
+    fn borrow(&self) -> &T {
+        &self.storage
+    }
+}
+
 pub struct BorrowedMutPointer<'a, P, T: 'a> {
     pub native: *mut P,
     pub storage: T,
@@ -112,6 +119,18 @@ impl<'a, P: Copy, T: 'a> BorrowedMutPointer<'a, P, T> {
 
     fn as_mut_ptr(&mut self) -> *mut P {
         self.native
+    }
+}
+
+impl<'a, P, T> Borrow<T> for BorrowedMutPointer<'a, P, T> {
+    fn borrow(&self) -> &T {
+        &self.storage
+    }
+}
+
+impl<'a, P, T> BorrowMut<T> for BorrowedMutPointer<'a, P, T> {
+    fn borrow_mut(&mut self) -> &mut T {
+        &mut self.storage
     }
 }
 
