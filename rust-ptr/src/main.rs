@@ -40,7 +40,7 @@ trait IntoForeign<T> {
 impl UnsafeFrom<*mut c_char> for String {
     // from_glib_full
     unsafe fn unsafe_from(ptr: *mut c_char) -> Self {
-        let res = Self::new_from_foreign(ptr);
+        let res = Self::with_foreign(ptr);
         libc::free(ptr as *mut c_void);
         res
     }
@@ -139,7 +139,7 @@ trait ForeignConvert<'a> {
     type Native: Copy;
     type Storage: 'a;
 
-    unsafe fn new_from_foreign(p: *const Self::Native) -> Self;
+    unsafe fn with_foreign(p: *const Self::Native) -> Self;
     fn as_foreign(&'a self) -> BorrowedPointer<'a, Self::Native, Self::Storage>;
 }
 
@@ -154,7 +154,7 @@ impl ForeignConvert<'_> for String {
     type Storage = CString;
 
     // from_glib_none
-    unsafe fn new_from_foreign(p: *const c_char) -> Self {
+    unsafe fn with_foreign(p: *const c_char) -> Self {
         let cstr = CStr::from_ptr(p);
         String::from_utf8_lossy(cstr.to_bytes()).into_owned()
     }
@@ -179,7 +179,7 @@ fn main() {
         let foreign = s.as_foreign();
         println!("A Rust String: {}", s);
         println!("Ownership not transferred: {}", unsafe {
-            String::new_from_foreign(foreign.as_ptr())
+            String::with_foreign(foreign.as_ptr())
         });
         println!("Still a Rust String: {}", s);
     }
@@ -200,7 +200,7 @@ fn main() {
     {
         let foreign: *mut c_char = s.into_foreign();
         println!("Ownership transferred to C: {}", unsafe {
-            String::new_from_foreign(foreign)
+            String::with_foreign(foreign)
         });
         println!("Ownership transferred back: {}", unsafe {
             String::unsafe_from(foreign)
