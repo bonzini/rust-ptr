@@ -4,6 +4,7 @@
 use libc::c_char;
 use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomData;
+use std::mem;
 use std::ptr;
 
 /// A type for which there is a canonical representation as a C datum.
@@ -327,6 +328,25 @@ pub trait ForeignBorrowMut<'a>: CloneToForeign {
 
     /// Return a wrapper for a C representation of `self`.  The wrapper
     /// allows access via a mutable pointer.
+    ///
+    /// ```
+    /// # use rust_ptr::ForeignBorrowMut;
+    /// let mut i = 123i8;
+    /// let mut borrowed = i.borrow_foreign_mut();
+    /// unsafe {
+    ///     assert_eq!(*borrowed.as_ptr(), 123i8);
+    ///     *borrowed.as_mut_ptr() = 45i8;
+    /// }
+    /// assert_eq!(i, 45i8);
+    /// ```
+    /// is analogous to:
+    /// ```
+    /// let mut i = 123i8;
+    /// let borrowed = &mut i;
+    /// assert_eq!(*borrowed, 123i8);
+    /// *borrowed = 45i8;
+    /// assert_eq!(i, 45i8);
+    /// ```
     fn borrow_foreign_mut(&'a mut self) -> BorrowedMutPointer<'a, Self::Foreign, Self::Storage>;
 }
 
@@ -409,11 +429,104 @@ impl ForeignBorrow<'_> for String {
     }
 }
 
+macro_rules! foreign_copy_type {
+    ($rust_type:ty, $foreign_type:ty) => {
+        impl CloneToForeign for $rust_type {
+            type Foreign = $foreign_type;
+
+            unsafe fn free_foreign(ptr: *mut Self::Foreign) {
+                libc::free(ptr as *mut c_void);
+            }
+
+            fn clone_to_foreign(&self) -> *mut Self::Foreign {
+                // Safety: we are copying into a freshly-allocated block
+                unsafe {
+                    let p = libc::malloc(mem::size_of::<Self>()) as *mut Self::Foreign;
+                    *p = *self as Self::Foreign;
+                    p
+                }
+            }
+        }
+
+        impl FromForeign for $rust_type {
+            unsafe fn cloned_from_foreign(p: *const Self::Foreign) -> Self {
+                *p
+            }
+        }
+
+        impl<'a> ForeignBorrow<'a> for $rust_type {
+            type Storage = &'a Self;
+
+            fn borrow_foreign(&self) -> BorrowedPointer<Self::Foreign, &Self> {
+                BorrowedPointer::new(self, self)
+            }
+        }
+
+        impl<'a> ForeignBorrowMut<'a> for $rust_type {
+            type Storage = &'a mut Self;
+
+            fn borrow_foreign_mut(&'a mut self) -> BorrowedMutPointer<Self::Foreign, &'a mut Self> {
+                BorrowedMutPointer::new(self, self)
+            }
+        }
+    };
+}
+foreign_copy_type!(i8, i8);
+foreign_copy_type!(u8, u8);
+foreign_copy_type!(i16, i16);
+foreign_copy_type!(u16, u16);
+foreign_copy_type!(i32, i32);
+foreign_copy_type!(u32, u32);
+foreign_copy_type!(i64, i64);
+foreign_copy_type!(u64, u64);
+foreign_copy_type!(isize, libc::ptrdiff_t);
+foreign_copy_type!(usize, libc::size_t);
+foreign_copy_type!(f32, f32);
+foreign_copy_type!(f64, f64);
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use matches::assert_matches;
     use std::ffi::c_void;
+
+    #[test]
+    fn test_foreign_int_convert() {
+        let i = 123i8;
+        unsafe {
+            let p = i.clone_to_foreign();
+            assert_eq!(i, *p);
+            assert_eq!(i, i8::cloned_from_foreign(p));
+            assert_eq!(i, p.into_native());
+
+            let p = i.clone_to_foreign();
+            assert_eq!(i, i8::from_foreign(p));
+        }
+    }
+
+    #[test]
+    fn test_foreign_int_borrow() {
+        let i = 123i8;
+        unsafe {
+            assert_eq!(i, *i.borrow_foreign().as_ptr());
+        }
+        assert_eq!(i, 123i8);
+    }
+
+    #[test]
+    fn test_foreign_int_borrow_mut() {
+        let mut i = 123i8;
+        let mut borrowed = i.borrow_foreign_mut();
+        unsafe {
+            assert_eq!(*borrowed.as_ptr(), 123i8);
+            *borrowed.as_mut_ptr() = 45i8;
+        }
+        let borrowed = i.borrow_foreign_mut();
+        unsafe {
+            assert_eq!(*borrowed.as_ptr(), 45i8);
+        }
+        assert_eq!(i, 45i8);
+    }
 
     #[test]
     fn test_borrow_foreign_string() {
@@ -448,6 +561,20 @@ mod tests {
         let cloned = s.clone_to_foreign();
         let copy = unsafe { String::from_foreign(cloned) };
         assert_eq!(s, copy);
+    }
+
+    #[test]
+    fn test_ptr_into_native() {
+        let s = "Hello, world!".to_string();
+        let cloned = s.clone_to_foreign();
+        let copy: String = unsafe { cloned.into_native() };
+        assert_eq!(s, copy);
+
+        // This is why type bounds are needed... they aren't for
+        // OwnedPointer::into_native
+        let cloned = s.clone_to_foreign();
+        let copy: i8 = unsafe { cloned.into_native() };
+        assert_eq!(s.as_bytes()[0], copy as u8);
     }
 
     #[test]
