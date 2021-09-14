@@ -469,6 +469,41 @@ macro_rules! foreign_copy_type {
                 BorrowedMutPointer::new(self, self)
             }
         }
+
+        impl CloneToForeign for [$rust_type] {
+            type Foreign = $foreign_type;
+
+            unsafe fn free_foreign(ptr: *mut Self::Foreign) {
+                libc::free(ptr as *mut c_void);
+            }
+
+            fn clone_to_foreign(&self) -> *mut Self::Foreign {
+                // SAFETY: self.as_ptr() is guaranteed to point to the same number of bytes
+                // as the freshly allocated destination
+                unsafe {
+                    let size = mem::size_of::<Self::Foreign>();
+                    let p = libc::malloc(self.len() * size) as *mut Self::Foreign;
+                    ptr::copy_nonoverlapping(self.as_ptr() as *const Self::Foreign, p, self.len());
+                    p
+                }
+            }
+        }
+
+        impl<'a> ForeignBorrow<'a> for [$rust_type] {
+            type Storage = &'a Self;
+
+            fn borrow_foreign(&self) -> BorrowedPointer<Self::Foreign, &Self> {
+                BorrowedPointer::new(self.as_ptr(), self)
+            }
+        }
+
+        impl<'a> ForeignBorrowMut<'a> for [$rust_type] {
+            type Storage = &'a mut Self;
+
+            fn borrow_foreign_mut(&'a mut self) -> BorrowedMutPointer<Self::Foreign, &'a mut Self> {
+                BorrowedMutPointer::new(self.as_mut_ptr(), self)
+            }
+        }
     };
 }
 foreign_copy_type!(i8, i8);
@@ -590,6 +625,43 @@ mod tests {
                 0
             );
             libc::free(cloned as *mut c_void);
+        }
+    }
+
+    #[test]
+    fn test_clone_to_foreign_bytes() {
+        let s = b"Hello, world!\0";
+        let cloned = s.clone_to_foreign();
+        unsafe {
+            let len = libc::strlen(cloned as *const c_char);
+            assert_eq!(len, s.len() - 1);
+            assert_eq!(
+                libc::memcmp(
+                    cloned as *const c_void,
+                    s.as_ptr() as *const c_void,
+                    len + 1
+                ),
+                0
+            );
+            libc::free(cloned as *mut c_void);
+        }
+    }
+
+    #[test]
+    fn test_borrow_foreign_bytes() {
+        let s = b"Hello, world!\0";
+        let borrowed = s.borrow_foreign();
+        unsafe {
+            let len = libc::strlen(borrowed.as_ptr() as *const c_char);
+            assert_eq!(len, s.len() - 1);
+            assert_eq!(
+                libc::memcmp(
+                    borrowed.as_ptr() as *const c_void,
+                    s.as_ptr() as *const c_void,
+                    len + 1
+                ),
+                0
+            );
         }
     }
 
