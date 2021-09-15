@@ -3,9 +3,140 @@
 /// idiomatic.
 use libc::c_char;
 use std::ffi::{c_void, CStr, CString};
+use std::fmt;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem;
 use std::ptr;
+
+pub struct OwnedPointer<T: CloneToForeign + ?Sized> {
+    ptr: *mut <T as CloneToForeign>::Foreign,
+}
+
+impl<T: CloneToForeign + ?Sized> OwnedPointer<T> {
+    /// Return a new `OwnedPointer` that wraps the pointer `ptr`.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be valid and live until the returned `OwnedPointer`
+    /// is dropped.
+    pub unsafe fn new(ptr: *mut <T as CloneToForeign>::Foreign) -> Self {
+        OwnedPointer { ptr }
+    }
+
+    /// Safely create an `OwnedPointer` from one that has the same
+    /// freeing function.
+    /// ```
+    /// # use rust_ptr::{CloneToForeign, OwnedPointer};
+    /// let s = "Hello, world!";
+    /// let foreign_str = s.clone_to_foreign();
+    /// let foreign_string = OwnedPointer::<String>::from(foreign_str);
+    /// # assert_eq!(foreign_string.into_native(), s);
+    pub fn from<U>(x: OwnedPointer<U>) -> Self
+    where
+        U: CloneToForeign<Foreign = <T as CloneToForeign>::Foreign> + ?Sized,
+    {
+        unsafe {
+            // SAFETY: the pointer type and free function are the same,
+            // only the type changes
+            OwnedPointer::new(x.into_inner())
+        }
+    }
+
+    /// Safely convert an `OwnedPointer` into one that has the same
+    /// freeing function.
+    /// ```
+    /// # use rust_ptr::{CloneToForeign, OwnedPointer};
+    /// let s = "Hello, world!";
+    /// let foreign_str = s.clone_to_foreign();
+    /// let foreign_string: OwnedPointer<String> = foreign_str.into();
+    /// # assert_eq!(foreign_string.into_native(), s);
+    pub fn into<U>(self) -> OwnedPointer<U>
+    where
+        U: CloneToForeign<Foreign = <T as CloneToForeign>::Foreign>,
+    {
+        OwnedPointer::from(self)
+    }
+
+    /// Return the pointer that is stored in the `OwnedPointer`.  The
+    /// pointer is valid for as long as the `OwnedPointer` itself.
+    ///
+    /// ```
+    /// # use rust_ptr::CloneToForeign;
+    /// let s = "Hello, world!";
+    /// let p = s.clone_to_foreign().into_inner();
+    /// let len = unsafe { libc::strlen(p) };
+    /// // p needs to be freed manually
+    /// # assert_eq!(len, 13);
+    /// ```
+    pub fn as_ptr(&self) -> *const <T as CloneToForeign>::Foreign {
+        self.ptr
+    }
+
+    pub fn as_mut_ptr(&self) -> *mut <T as CloneToForeign>::Foreign {
+        self.ptr
+    }
+
+    /// Return the pointer that is stored in the `OwnedPointer`,
+    /// consuming the `OwnedPointer` but not freeing the pointer.
+    ///
+    /// ```
+    /// # use rust_ptr::CloneToForeign;
+    /// let s = "Hello, world!";
+    /// let p = s.clone_to_foreign().into_inner();
+    /// let len = unsafe { libc::strlen(p) };
+    /// // p needs to be freed manually
+    /// # assert_eq!(len, 13);
+    /// ```
+    pub fn into_inner(mut self) -> *mut <T as CloneToForeign>::Foreign {
+        let result = mem::replace(&mut self.ptr, ptr::null_mut());
+        mem::forget(self);
+        result
+    }
+}
+
+impl<T: FromForeign + ?Sized> OwnedPointer<T> {
+    /// Convert a C datum to a native Rust object, taking ownership of
+    /// the pointer or Rust object (same as `from_glib_full` in `glib-rs`)
+    ///
+    /// ```
+    /// # use rust_ptr::{CloneToForeign, IntoNative};
+    /// let s = "Hello, world!".to_string();
+    /// let foreign = s.clone_to_foreign();
+    /// let native: String = unsafe {
+    ///     foreign.into_native()
+    ///     // foreign is not leaked
+    /// };
+    /// assert_eq!(s, native);
+    /// ```
+    pub fn into_native(self) -> T {
+        // SAFETY: the pointer was passed to the unsafe constructor OwnedPointer::new
+        unsafe { T::from_foreign(self.into_inner()) }
+    }
+}
+
+impl<T: CloneToForeign + ?Sized> Debug for OwnedPointer<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = std::any::type_name::<T>();
+        let name = format!("OwnedPointer<{}>", name);
+        f.debug_tuple(&name).field(&self.as_ptr()).finish()
+    }
+}
+
+impl<T: CloneToForeign + ?Sized> Default for OwnedPointer<T> {
+    fn default() -> Self {
+        // SAFETY: freeing a null pointer is safe
+        unsafe { OwnedPointer::new(ptr::null_mut()) }
+    }
+}
+
+impl<T: CloneToForeign + ?Sized> Drop for OwnedPointer<T> {
+    fn drop(&mut self) {
+        let p = mem::replace(&mut self.ptr, ptr::null_mut());
+        // SAFETY: the pointer was passed to the unsafe constructor OwnedPointer::new
+        unsafe { T::free_foreign(p) }
+    }
+}
 
 /// A type for which there is a canonical representation as a C datum.
 pub trait CloneToForeign {
@@ -22,17 +153,16 @@ pub trait CloneToForeign {
     ///
     /// ```
     /// # use rust_ptr::CloneToForeign;
-    /// let s = "Hello, world!".to_string();
-    /// let foreign = s.clone_to_foreign();
+    /// let foreign = "Hello, world!".clone_to_foreign();
     /// unsafe {
-    ///     String::free_foreign(foreign);
+    ///     String::free_foreign(foreign.into_inner());
     /// }
     /// ```
     unsafe fn free_foreign(p: *mut Self::Foreign);
 
     /// Convert a native Rust object to a foreign C struct, copying
     /// everything pointed to by `self` (same as `to_glib_full` in `glib-rs`)
-    fn clone_to_foreign(&self) -> *mut Self::Foreign;
+    fn clone_to_foreign(&self) -> OwnedPointer<Self>;
 }
 
 /// A type which can be constructed from a canonical representation as a
@@ -71,7 +201,7 @@ pub trait FromForeign: CloneToForeign + Sized {
     /// let s = "Hello, world!";
     /// let foreign = s.clone_to_foreign();
     /// unsafe {
-    ///     assert_eq!(String::from_foreign(foreign), s);
+    ///     assert_eq!(String::from_foreign(foreign.into_inner()), s);
     /// }
     /// // foreign is not leaked
     /// ```
@@ -92,12 +222,13 @@ where
         T::free_foreign(x)
     }
 
-    fn clone_to_foreign(&self) -> *mut Self::Foreign {
+    fn clone_to_foreign(&self) -> OwnedPointer<Self> {
         // Same as the underlying implementation, but also convert `None`
         // to a `NULL` pointer.
         self.as_ref()
             .map(|x| x.clone_to_foreign())
-            .unwrap_or(ptr::null_mut())
+            .unwrap_or_default()
+            .into()
     }
 }
 
@@ -121,8 +252,8 @@ where
         T::free_foreign(x)
     }
 
-    fn clone_to_foreign(&self) -> *mut Self::Foreign {
-        self.as_ref().clone_to_foreign()
+    fn clone_to_foreign(&self) -> OwnedPointer<Self> {
+        self.as_ref().clone_to_foreign().into()
     }
 }
 
@@ -382,14 +513,14 @@ impl CloneToForeign for str {
         libc::free(ptr as *mut c_void);
     }
 
-    fn clone_to_foreign(&self) -> *mut c_char {
+    fn clone_to_foreign(&self) -> OwnedPointer<Self> {
         // SAFETY: self.as_ptr() is guaranteed to point to self.len() bytes;
         // the destination is freshly allocated
         unsafe {
             let p = libc::malloc(self.len() + 1) as *mut c_char;
             ptr::copy_nonoverlapping(self.as_ptr() as *const c_char, p, self.len());
             *p.add(self.len()) = 0;
-            p
+            OwnedPointer::new(p)
         }
     }
 }
@@ -401,14 +532,14 @@ impl CloneToForeign for String {
         libc::free(ptr as *mut c_void);
     }
 
-    fn clone_to_foreign(&self) -> *mut c_char {
+    fn clone_to_foreign(&self) -> OwnedPointer<Self> {
         // SAFETY: self.as_ptr() is guaranteed to point to self.len() bytes;
         // the destination is freshly allocated
         unsafe {
             let p = libc::malloc(self.len() + 1) as *mut c_char;
             ptr::copy_nonoverlapping(self.as_ptr() as *const c_char, p, self.len());
             *p.add(self.len()) = 0;
-            p
+            OwnedPointer::new(p)
         }
     }
 }
@@ -438,12 +569,12 @@ macro_rules! foreign_copy_type {
                 libc::free(ptr as *mut c_void);
             }
 
-            fn clone_to_foreign(&self) -> *mut Self::Foreign {
+            fn clone_to_foreign(&self) -> OwnedPointer<Self> {
                 // Safety: we are copying into a freshly-allocated block
                 unsafe {
                     let p = libc::malloc(mem::size_of::<Self>()) as *mut Self::Foreign;
                     *p = *self as Self::Foreign;
-                    p
+                    OwnedPointer::new(p)
                 }
             }
         }
@@ -477,14 +608,14 @@ macro_rules! foreign_copy_type {
                 libc::free(ptr as *mut c_void);
             }
 
-            fn clone_to_foreign(&self) -> *mut Self::Foreign {
+            fn clone_to_foreign(&self) -> OwnedPointer<Self> {
                 // SAFETY: self.as_ptr() is guaranteed to point to the same number of bytes
                 // as the freshly allocated destination
                 unsafe {
                     let size = mem::size_of::<Self::Foreign>();
                     let p = libc::malloc(self.len() * size) as *mut Self::Foreign;
                     ptr::copy_nonoverlapping(self.as_ptr() as *const Self::Foreign, p, self.len());
-                    p
+                    OwnedPointer::new(p)
                 }
             }
         }
@@ -528,14 +659,16 @@ mod tests {
     #[test]
     fn test_foreign_int_convert() {
         let i = 123i8;
+        let p = i.clone_to_foreign();
         unsafe {
-            let p = i.clone_to_foreign();
-            assert_eq!(i, *p);
-            assert_eq!(i, i8::cloned_from_foreign(p));
-            assert_eq!(i, p.into_native());
+            assert_eq!(i, *p.as_ptr());
+            assert_eq!(i, i8::cloned_from_foreign(p.as_ptr()));
+        }
+        assert_eq!(i, p.into_native());
 
-            let p = i.clone_to_foreign();
-            assert_eq!(i, i8::from_foreign(p));
+        let p = i.clone_to_foreign();
+        unsafe {
+            assert_eq!(i, i8::from_foreign(p.into_inner()));
         }
     }
 
@@ -594,7 +727,23 @@ mod tests {
     fn test_from_foreign_string() {
         let s = "Hello, world!".to_string();
         let cloned = s.clone_to_foreign();
-        let copy = unsafe { String::from_foreign(cloned) };
+        let copy = unsafe { String::from_foreign(cloned.into_inner()) };
+        assert_eq!(s, copy);
+    }
+
+    #[test]
+    fn test_owned_pointer_into() {
+        let s = "Hello, world!".to_string();
+        let cloned: OwnedPointer<String> = s.clone_to_foreign().into();
+        let copy = cloned.into_native();
+        assert_eq!(s, copy);
+    }
+
+    #[test]
+    fn test_owned_pointer_into_native() {
+        let s = "Hello, world!".to_string();
+        let cloned = s.clone_to_foreign();
+        let copy = cloned.into_native();
         assert_eq!(s, copy);
     }
 
@@ -602,13 +751,13 @@ mod tests {
     fn test_ptr_into_native() {
         let s = "Hello, world!".to_string();
         let cloned = s.clone_to_foreign();
-        let copy: String = unsafe { cloned.into_native() };
+        let copy: String = unsafe { cloned.into_inner().into_native() };
         assert_eq!(s, copy);
 
         // This is why type bounds are needed... they aren't for
         // OwnedPointer::into_native
         let cloned = s.clone_to_foreign();
-        let copy: i8 = unsafe { cloned.into_native() };
+        let copy: i8 = unsafe { cloned.into_inner().into_native() };
         assert_eq!(s.as_bytes()[0], copy as u8);
     }
 
@@ -618,13 +767,16 @@ mod tests {
         let p = b"Hello, world!\0".as_ptr();
         let cloned = s.clone_to_foreign();
         unsafe {
-            let len = libc::strlen(cloned);
+            let len = libc::strlen(cloned.as_ptr());
             assert_eq!(len, s.len());
             assert_eq!(
-                libc::memcmp(cloned as *const c_void, p as *const c_void, len + 1),
+                libc::memcmp(
+                    cloned.as_ptr() as *const c_void,
+                    p as *const c_void,
+                    len + 1
+                ),
                 0
             );
-            libc::free(cloned as *mut c_void);
         }
     }
 
@@ -633,17 +785,16 @@ mod tests {
         let s = b"Hello, world!\0";
         let cloned = s.clone_to_foreign();
         unsafe {
-            let len = libc::strlen(cloned as *const c_char);
+            let len = libc::strlen(cloned.as_ptr() as *const c_char);
             assert_eq!(len, s.len() - 1);
             assert_eq!(
                 libc::memcmp(
-                    cloned as *const c_void,
+                    cloned.as_ptr() as *const c_void,
                     s.as_ptr() as *const c_void,
                     len + 1
                 ),
                 0
             );
-            libc::free(cloned as *mut c_void);
         }
     }
 
@@ -670,19 +821,18 @@ mod tests {
         let s = "Hello, world!".to_string();
         let borrowed = s.borrow_foreign();
         let cloned = s.clone_to_foreign();
-        assert_ne!(borrowed.as_ptr(), cloned);
+        assert_ne!(borrowed.as_ptr(), cloned.as_ptr());
         unsafe {
-            let len = libc::strlen(cloned);
+            let len = libc::strlen(cloned.as_ptr());
             assert_eq!(len, s.len());
             assert_eq!(
                 libc::memcmp(
-                    cloned as *const c_void,
+                    cloned.as_ptr() as *const c_void,
                     borrowed.as_ptr() as *const c_void,
                     len + 1
                 ),
                 0
             );
-            libc::free(cloned as *mut c_void);
         }
     }
 
